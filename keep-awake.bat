@@ -24,8 +24,8 @@ set /a remainingMinutes=%minutes% %% 60
 echo.
 echo ============================================
 echo Keeping system awake for %minutes% minutes
-if %hours% gtr 0 (
-    echo (%hours% hour(s) and %remainingMinutes% minute(s))
+if !hours! GTR 0 (
+    echo Equivalent to: !hours! hours and !remainingMinutes! minutes
 )
 echo ============================================
 echo Press Ctrl+C to stop early.
