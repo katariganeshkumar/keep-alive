@@ -1,140 +1,199 @@
-@echo off
-setlocal enabledelayedexpansion
+' ============================================
+' Windows Keep-Awake Script (VBScript)
+' Prevents system sleep/lock using Windows API
+' Optimized for Windows 11 - Office Laptop
+' ============================================
 
-REM ============================================
-REM Windows Keep-Awake Script
-REM Prevents system sleep/lock using multiple methods
-REM ============================================
+Option Explicit
 
-REM Get user input for minutes
-set /p minutes="Enter number of minutes to stay awake: "
+Dim objShell, minutes, seconds, startTime, endTime
+Dim objFSO, pidFile, pid
 
-REM Validate input
-if "%minutes%"=="" (
-    echo Invalid input. Exiting...
-    pause
-    exit /b 1
-)
+' Create objects
+Set objShell = CreateObject("WScript.Shell")
+Set objFSO = CreateObject("Scripting.FileSystemObject")
 
-REM Convert minutes to seconds
-set /a seconds=%minutes% * 60
-set /a hours=%minutes% / 60
-set /a remainingMinutes=%minutes% %% 60
+' PID file for reference (optional)
+pidFile = objFSO.BuildPath(objShell.ExpandEnvironmentStrings("%TEMP%"), "keepawake_pid.txt")
 
-echo.
-echo ============================================
-echo Keeping system awake for %minutes% minutes
-if !hours! GTR 0 (
-    echo Equivalent to: !hours! hours and !remainingMinutes! minutes
-)
-echo ============================================
-echo Press Ctrl+C to stop early.
-echo.
+' ============================================
+' Get user input
+' ============================================
+Do
+    minutes = InputBox("Enter number of minutes to stay awake:" & vbCrLf & vbCrLf & _
+                       "Examples:" & vbCrLf & _
+                       "  30 = 30 minutes" & vbCrLf & _
+                       "  60 = 1 hour" & vbCrLf & _
+                       "  120 = 2 hours", _
+                       "Keep-Awake Script", "30")
+    
+    If minutes = "" Then
+        WScript.Quit
+    End If
+    
+    ' Validate input
+    If IsNumeric(minutes) Then
+        minutes = CInt(minutes)
+        If minutes > 0 Then
+            Exit Do
+        End If
+    End If
+    
+    MsgBox "Please enter a valid number greater than 0.", vbExclamation, "Invalid Input"
+Loop
 
-REM Save current time for display
-for /f "tokens=2 delims==" %%I in ('wmic os get localdatetime /value') do set datetime=%%I
-set startTime=%datetime:~8,2%:%datetime:~10,2%:%datetime:~12,2%
+seconds = minutes * 60
+startTime = Now
+endTime = DateAdd("s", seconds, startTime)
 
-echo Started at: %startTime%
-echo.
+' Calculate hours and remaining minutes for display
+Dim hours, remainingMinutes
+hours = Int(minutes / 60)
+remainingMinutes = minutes Mod 60
 
-REM ============================================
-REM METHOD 1: Disable sleep using powercfg
-REM ============================================
-echo [Method 1] Disabling sleep timeouts...
-powercfg /change standby-timeout-ac 0 >nul 2>&1
-powercfg /change standby-timeout-dc 0 >nul 2>&1
-powercfg /change monitor-timeout-ac 0 >nul 2>&1
-powercfg /change monitor-timeout-dc 0 >nul 2>&1
-powercfg /change hibernate-timeout-ac 0 >nul 2>&1
-powercfg /change hibernate-timeout-dc 0 >nul 2>&1
+' Display confirmation
+Dim msg
+msg = "Keeping system awake for " & minutes & " minute"
+If minutes <> 1 Then msg = msg & "s"
+msg = msg & vbCrLf & vbCrLf
 
-REM Create PID file for cleanup
-set PIDFILE=%TEMP%\keepawake_pids.txt
-echo. > "%PIDFILE%"
+If hours > 0 Then
+    msg = msg & "Duration: " & hours & " hour"
+    If hours <> 1 Then msg = msg & "s"
+    If remainingMinutes > 0 Then
+        msg = msg & " and " & remainingMinutes & " minute"
+        If remainingMinutes <> 1 Then msg = msg & "s"
+    End If
+    msg = msg & vbCrLf & vbCrLf
+End If
 
-REM ============================================
-REM METHOD 2: PowerShell SetThreadExecutionState API
-REM This prevents system sleep at the API level
-REM ============================================
-echo [Method 2] Activating SetThreadExecutionState API...
-start /B powershell -WindowStyle Hidden -Command "$pid = $PID; Add-Content -Path '%PIDFILE%' -Value $pid; $code = '[DllImport(\"kernel32.dll\", CharSet = CharSet.Auto, SetLastError = true)] public static extern uint SetThreadExecutionState(uint esFlags);'; $type = Add-Type -MemberDefinition $code -Name SystemState -Namespace Win32 -PassThru; $ES_CONTINUOUS = 0x80000000; $ES_SYSTEM_REQUIRED = 0x00000001; $ES_DISPLAY_REQUIRED = 0x00000002; $flags = $ES_CONTINUOUS -bor $ES_SYSTEM_REQUIRED -bor $ES_DISPLAY_REQUIRED; $startTime = Get-Date; $endTime = $startTime.AddSeconds(%seconds%); while ((Get-Date) -lt $endTime) { $type::SetThreadExecutionState($flags); Start-Sleep -Seconds 5 }"
+msg = msg & "Started at: " & FormatDateTime(startTime, vbLongTime) & vbCrLf
+msg = msg & "Will end at: " & FormatDateTime(endTime, vbLongTime) & vbCrLf & vbCrLf
+msg = msg & "Click OK to start. The script will run in the background." & vbCrLf
+msg = msg & "To stop early, look for 'Windows Script Host' in Task Manager and end it."
 
-REM ============================================
-REM METHOD 3: Subtle mouse movement
-REM Moves mouse 1 pixel and back every 30 seconds
-REM ============================================
-echo [Method 3] Starting subtle mouse movement...
-start /B powershell -WindowStyle Hidden -Command "$pid = $PID; Add-Content -Path '%PIDFILE%' -Value $pid; $startTime = Get-Date; $endTime = $startTime.AddSeconds(%seconds%); Add-Type -AssemblyName System.Windows.Forms; while ((Get-Date) -lt $endTime) { $pos = [System.Windows.Forms.Cursor]::Position; [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(($pos.X + 1), $pos.Y); Start-Sleep -Milliseconds 50; [System.Windows.Forms.Cursor]::Position = $pos; Start-Sleep -Seconds 30 }"
+MsgBox msg, vbInformation, "Keep-Awake Script"
 
-REM ============================================
-REM METHOD 4: Prevent lock screen using PowerShell
-REM ============================================
-echo [Method 4] Preventing lock screen...
-start /B powershell -WindowStyle Hidden -Command "$pid = $PID; Add-Content -Path '%PIDFILE%' -Value $pid; $startTime = Get-Date; $endTime = $startTime.AddSeconds(%seconds%); while ((Get-Date) -lt $endTime) { [System.Windows.Forms.Application]::SetSuspendState([System.Windows.Forms.PowerState]::Suspend, $false, $false); Start-Sleep -Seconds 15 }"
+' ============================================
+' Save PID for cleanup reference
+' ============================================
+pid = objShell.Exec("cmd /c echo %PID%").StdOut.ReadAll
+pid = Trim(pid)
+If pid = "" Then pid = "0"
 
-REM ============================================
-REM Main countdown loop with progress display
-REM ============================================
-echo.
-echo All methods activated. Countdown starting...
-echo.
+' Write PID to file
+Dim objFile
+Set objFile = objFSO.CreateTextFile(pidFile, True)
+objFile.WriteLine pid
+objFile.Close
 
-set /a elapsed=0
-set /a interval=30
+' ============================================
+' METHOD 1: Disable sleep using powercfg
+' ============================================
+On Error Resume Next
+objShell.Run "powercfg /change standby-timeout-ac 0", 0, True
+objShell.Run "powercfg /change standby-timeout-dc 0", 0, True
+objShell.Run "powercfg /change monitor-timeout-ac 0", 0, True
+objShell.Run "powercfg /change monitor-timeout-dc 0", 0, True
+objShell.Run "powercfg /change hibernate-timeout-ac 0", 0, True
+objShell.Run "powercfg /change hibernate-timeout-dc 0", 0, True
+On Error Goto 0
 
-:loop
-if %elapsed% geq %seconds% goto :done
+' ============================================
+' METHOD 2: Use PowerShell with SetThreadExecutionState API
+' This is the most reliable method
+' ============================================
+Dim psCommand
+psCommand = "$code = '[DllImport(""kernel32.dll"", CharSet = CharSet.Auto, SetLastError = true)] public static extern uint SetThreadExecutionState(uint esFlags);'; " & _
+            "$type = Add-Type -MemberDefinition $code -Name SystemState -Namespace Win32 -PassThru; " & _
+            "$ES_CONTINUOUS = 0x80000000; " & _
+            "$ES_SYSTEM_REQUIRED = 0x00000001; " & _
+            "$ES_DISPLAY_REQUIRED = 0x00000002; " & _
+            "$flags = $ES_CONTINUOUS -bor $ES_SYSTEM_REQUIRED -bor $ES_DISPLAY_REQUIRED; " & _
+            "$startTime = Get-Date; " & _
+            "$endTime = $startTime.AddSeconds(" & seconds & "); " & _
+            "while ((Get-Date) -lt $endTime) { " & _
+            "  $type::SetThreadExecutionState($flags); " & _
+            "  Start-Sleep -Seconds 5 " & _
+            "}"
 
-set /a remaining=%seconds% - %elapsed%
-set /a remainingMinutes=%remaining% / 60
-set /a remainingSeconds=%remaining% %% 60
+' Run PowerShell in background
+objShell.Run "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -Command """ & psCommand & """", 0, False
 
-REM Display progress
-cls
-echo ============================================
-echo KEEP-AWAKE ACTIVE
-echo ============================================
-echo Started at: %startTime%
-echo Time remaining: %remainingMinutes% min %remainingSeconds% sec
-echo Elapsed: %elapsed% seconds
-echo.
-echo Methods active:
-echo   [1] Power settings disabled
-echo   [2] SetThreadExecutionState API
-echo   [3] Mouse movement simulation
-echo   [4] Lock screen prevention
-echo.
-echo Press Ctrl+C to stop early
-echo ============================================
+' ============================================
+' METHOD 3: Subtle mouse movement (via PowerShell)
+' ============================================
+Dim psMouseCommand
+psMouseCommand = "$startTime = Get-Date; " & _
+                 "$endTime = $startTime.AddSeconds(" & seconds & "); " & _
+                 "Add-Type -AssemblyName System.Windows.Forms; " & _
+                 "while ((Get-Date) -lt $endTime) { " & _
+                 "  $pos = [System.Windows.Forms.Cursor]::Position; " & _
+                 "  [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(($pos.X + 1), $pos.Y); " & _
+                 "  Start-Sleep -Milliseconds 50; " & _
+                 "  [System.Windows.Forms.Cursor]::Position = $pos; " & _
+                 "  Start-Sleep -Seconds 30 " & _
+                 "}"
 
-timeout /t %interval% /nobreak >nul 2>&1
-set /a elapsed+=%interval%
+objShell.Run "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -Command """ & psMouseCommand & """", 0, False
 
-goto :loop
+' ============================================
+' Main loop: Keep script alive
+' ============================================
+Dim elapsed, remaining
 
-:done
-echo.
-echo ============================================
-echo Time's up! Restoring normal power settings...
-echo ============================================
+' Show initial notification
+Dim startMsg
+startMsg = "Keep-Awake started!" & vbCrLf & vbCrLf & _
+           "Duration: " & minutes & " minute"
+If minutes <> 1 Then startMsg = startMsg & "s"
+startMsg = startMsg & vbCrLf & _
+           "Started: " & FormatDateTime(startTime, vbLongTime) & vbCrLf & _
+           "Will end: " & FormatDateTime(endTime, vbLongTime) & vbCrLf & vbCrLf & _
+           "The script is running in the background." & vbCrLf & _
+           "To stop early: Open Task Manager and end 'Windows Script Host'"
 
-REM Kill background PowerShell processes using saved PIDs
-if exist "%PIDFILE%" (
-    for /f %%p in (%PIDFILE%) do (
-        taskkill /F /PID %%p >nul 2>&1
-    )
-    del "%PIDFILE%" >nul 2>&1
-)
+objShell.Popup startMsg, 5, "Keep-Awake Active", vbInformation
 
-REM Restore power settings (optional - uncomment if you want to restore defaults)
-REM echo Restoring power settings...
-REM powercfg /change standby-timeout-ac 10
-REM powercfg /change standby-timeout-dc 5
-REM powercfg /change monitor-timeout-ac 10
-REM powercfg /change monitor-timeout-dc 5
+' Main countdown loop - runs silently in background
+Do While Now < endTime
+    elapsed = DateDiff("s", startTime, Now)
+    remaining = seconds - elapsed
+    
+    If remaining <= 0 Then Exit Do
+    
+    ' Sleep for 10 seconds between checks
+    WScript.Sleep 10000
+Loop
 
-echo.
-echo Done! System will now follow normal power settings.
-echo.
-pause
+' ============================================
+' Cleanup: Restore power settings
+' ============================================
+On Error Resume Next
+
+' Try to restore power settings (optional - commented out by default)
+' Uncomment these lines if you want to restore defaults:
+' objShell.Run "powercfg /change standby-timeout-ac 10", 0, True
+' objShell.Run "powercfg /change standby-timeout-dc 5", 0, True
+' objShell.Run "powercfg /change monitor-timeout-ac 10", 0, True
+' objShell.Run "powercfg /change monitor-timeout-dc 5", 0, True
+
+' Clean up PID file
+If objFSO.FileExists(pidFile) Then
+    objFSO.DeleteFile pidFile, True
+End If
+
+On Error Goto 0
+
+' Final message
+MsgBox "Time's up!" & vbCrLf & vbCrLf & _
+       "Keep-awake session completed." & vbCrLf & _
+       "System will now follow normal power settings.", _
+       vbInformation, "Keep-Awake Script"
+
+' Cleanup
+Set objShell = Nothing
+Set objFSO = Nothing
+
+WScript.Quit
+
